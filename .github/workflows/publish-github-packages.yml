@@ -1,0 +1,51 @@
+name: Publish to GitHub Packages
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Branch or commit to publish
+        required: true
+        default: fix/flatpak-sni-bus-name
+      version:
+        description: Maven version (must be new for each publish)
+        required: true
+        default: 0.1.3-flatpak.1
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.ref }}
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '22'
+          server-id: github
+          server-username: GITHUB_ACTOR
+          server-password: GITHUB_TOKEN
+      - uses: gradle/actions/setup-gradle@v6
+      - name: Build and test
+        env:
+          VERSION: ${{ inputs.version }}
+        run: ./gradlew build sourcesJar generatePomFileForMavenPublication -PappVersion="$VERSION"
+      - name: Publish Maven package
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          # deploy-file does not upload Gradle module metadata. Remove the
+          # generated POM hint that would otherwise claim it is available.
+          sed -i '/<!-- This module was also published with a richer model, Gradle metadata,  -->/,/<!-- do_not_remove: published-with-gradle-metadata -->/d' build/publications/maven/pom-default.xml
+          mvn -B org.apache.maven.plugins:maven-deploy-plugin:3.1.4:deploy-file \
+            -DrepositoryId=github \
+            -Durl="https://maven.pkg.github.com/${GITHUB_REPOSITORY}" \
+            -DpomFile=build/publications/maven/pom-default.xml \
+            -Dfile="build/libs/libtray-${VERSION}.jar" \
+            -Dsources="build/libs/libtray-${VERSION}-sources.jar"
